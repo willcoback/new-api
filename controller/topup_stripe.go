@@ -146,6 +146,12 @@ func RequestStripePay(c *gin.Context) {
 }
 
 func StripeWebhook(c *gin.Context) {
+	if setting.StripeWebhookSecret == "" {
+		log.Println("StripeWebhookSecret 未配置，拒绝处理 Webhook 请求")
+		c.AbortWithStatus(http.StatusServiceUnavailable)
+		return
+	}
+
 	payload, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		log.Printf("解析Stripe Webhook参数失败: %v\n", err)
@@ -195,7 +201,7 @@ func sessionCompleted(event stripe.Event) {
 		"currency":     strings.ToUpper(event.GetObjectValue("currency")),
 		"event_type":   string(event.Type),
 	}
-	if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload)); err == nil {
+	if err := model.CompleteSubscriptionOrder(referenceId, common.GetJsonString(payload), "stripe"); err == nil {
 		return
 	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
 		log.Println("complete subscription order failed:", err.Error(), referenceId)
@@ -229,7 +235,7 @@ func sessionExpired(event stripe.Event) {
 	// Subscription order expiration
 	LockOrder(referenceId)
 	defer UnlockOrder(referenceId)
-	if err := model.ExpireSubscriptionOrder(referenceId); err == nil {
+	if err := model.ExpireSubscriptionOrder(referenceId, "stripe"); err == nil {
 		return
 	} else if err != nil && !errors.Is(err, model.ErrSubscriptionOrderNotFound) {
 		log.Println("过期订阅订单失败", referenceId, ", err:", err.Error())
@@ -242,8 +248,14 @@ func sessionExpired(event stripe.Event) {
 		return
 	}
 
+	if topUp.PaymentMethod != "stripe" {
+		log.Println("支付方式不匹配，跳过过期处理", referenceId)
+		return
+	}
+
 	if topUp.Status != common.TopUpStatusPending {
-		log.Println("充值订单状态错误", referenceId)
+		log.Println("充值订单状态错误，跳过过期处理", referenceId)
+		return
 	}
 
 	topUp.Status = common.TopUpStatusExpired

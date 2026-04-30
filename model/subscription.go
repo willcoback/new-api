@@ -505,7 +505,8 @@ func CreateUserSubscriptionFromPlanTx(tx *gorm.DB, userId int, plan *Subscriptio
 }
 
 // Complete a subscription order (idempotent). Creates a UserSubscription snapshot from the plan.
-func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
+// expectedPaymentMethod is used to bind the completion to a specific payment provider.
+func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedPaymentMethod string) error {
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
@@ -528,6 +529,12 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string) error {
 		}
 		if order.Status != common.TopUpStatusPending {
 			return ErrSubscriptionOrderStatusInvalid
+		}
+		if expectedPaymentMethod == "" {
+			return errors.New("未指定预期支付方式")
+		}
+		if order.PaymentMethod != expectedPaymentMethod {
+			return errors.New("支付方式不匹配，拒绝处理")
 		}
 		plan, err := GetSubscriptionPlanById(order.PlanId)
 		if err != nil {
@@ -605,7 +612,8 @@ func upsertSubscriptionTopUpTx(tx *gorm.DB, order *SubscriptionOrder) error {
 	return tx.Save(&topup).Error
 }
 
-func ExpireSubscriptionOrder(tradeNo string) error {
+// expectedPaymentMethod is used to bind the expiration to a specific payment provider.
+func ExpireSubscriptionOrder(tradeNo string, expectedPaymentMethod string) error {
 	if tradeNo == "" {
 		return errors.New("tradeNo is empty")
 	}
@@ -620,6 +628,12 @@ func ExpireSubscriptionOrder(tradeNo string) error {
 		}
 		if order.Status != common.TopUpStatusPending {
 			return nil
+		}
+		if expectedPaymentMethod == "" {
+			return errors.New("未指定预期支付方式")
+		}
+		if order.PaymentMethod != expectedPaymentMethod {
+			return errors.New("支付方式不匹配，拒绝处理")
 		}
 		order.Status = common.TopUpStatusExpired
 		order.CompleteTime = common.GetTimestamp()

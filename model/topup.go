@@ -78,11 +78,18 @@ func Recharge(referenceId string, customerId string) (err error) {
 			return errors.New("充值订单状态错误")
 		}
 
-		topUp.CompleteTime = common.GetTimestamp()
-		topUp.Status = common.TopUpStatusSuccess
-		err = tx.Save(topUp).Error
-		if err != nil {
-			return err
+		if topUp.PaymentMethod != "stripe" {
+			return errors.New("支付方式不匹配，拒绝处理")
+		}
+
+		now := common.GetTimestamp()
+		result := tx.Model(&TopUp{}).Where(refCol+" = ? AND status = ? AND payment_method = ?", referenceId, common.TopUpStatusPending, "stripe").
+			Updates(map[string]interface{}{"status": common.TopUpStatusSuccess, "complete_time": now})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return errors.New("订单已被处理或支付方式不匹配")
 		}
 
 		quota = topUp.Money * common.QuotaPerUnit
